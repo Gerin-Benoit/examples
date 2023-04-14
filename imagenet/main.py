@@ -20,6 +20,9 @@ import torchvision.models as models
 import torchvision.transforms as transforms
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import Subset
+from .resnet import *
+from .spectral_norm_conv_inplace import *
+from .spectral_norm_fc import *
 
 model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
@@ -78,6 +81,12 @@ parser.add_argument('--multiprocessing-distributed', action='store_true',
                          'multi node data parallel training')
 parser.add_argument('--dummy', action='store_true', help="use fake data to benchmark")
 
+
+parser.add_argument('--wandb_project', type=str, default='ImageNet', help='wandb project name')
+parser.add_argument('--c', type=float, default=0, help='Lipschitz constant: 0 for no SN, positive for soft, negative '
+                                                       'for hard')
+parser.add_argument('--norm_layer', default='batchnorm', help='norm layer to use : batchnorm or actnorm')
+
 best_acc1 = 0
 
 
@@ -87,6 +96,8 @@ def main():
     if args.seed is not None:
         random.seed(args.seed)
         torch.manual_seed(args.seed)
+        torch.cuda.manual_seed_all(args.seed)
+        '''
         cudnn.deterministic = True
         cudnn.benchmark = False
         warnings.warn('You have chosen to seed training. '
@@ -94,6 +105,7 @@ def main():
                       'which can slow down your training considerably! '
                       'You may see unexpected behavior when restarting '
                       'from checkpoints.')
+        '''
 
     if args.gpu is not None:
         warnings.warn('You have chosen a specific GPU. This will completely '
@@ -141,8 +153,10 @@ def main_worker(gpu, ngpus_per_node, args):
         print("=> using pre-trained model '{}'".format(args.arch))
         model = models.__dict__[args.arch](pretrained=True)
     else:
-        print("=> creating model '{}'".format(args.arch))
-        model = models.__dict__[args.arch]()
+        print("=> creating model ")  # '{}'".format(args.arch))
+        num_classes = 1000
+        model = ResNet50(c=args.c, num_classes=num_classes, norm_layer=args.norm_layer, device='cuda')  # not clean device
+        print(model)
 
     if not torch.cuda.is_available() and not torch.backends.mps.is_available():
         print('using CPU, this will be slow')
@@ -266,6 +280,19 @@ def main_worker(gpu, ngpus_per_node, args):
         val_dataset, batch_size=args.batch_size, shuffle=False,
         num_workers=args.workers, pin_memory=True, sampler=val_sampler)
 
+    wandb.login()
+    wandb.init(project=args.wandb_project, entity='max_and_ben')
+    model_name = args.wandb_project
+    if args.c == 0:
+        model_name += '_unconstrained_'
+    elif args.c > 0:
+        model_name += '_soft_constrained_'
+    else:
+        model_name += '_hard_constrained_'
+    model_name += args.norm_layer + '_'
+    model_name += str(args.seed)
+    wandb.run.name = model_name
+
     if args.evaluate:
         validate(val_loader, model, criterion, args)
         return
@@ -278,7 +305,7 @@ def main_worker(gpu, ngpus_per_node, args):
         train(train_loader, model, criterion, optimizer, epoch, device, args)
 
         # evaluate on validation set
-        acc1 = validate(val_loader, model, criterion, args)
+        acc1 = validate(val_loader, model, criterion, epoch, args)
         
         scheduler.step()
         
@@ -288,14 +315,36 @@ def main_worker(gpu, ngpus_per_node, args):
 
         if not args.multiprocessing_distributed or (args.multiprocessing_distributed
                 and args.rank % ngpus_per_node == 0):
-            save_checkpoint({
-                'epoch': epoch + 1,
-                'arch': args.arch,
-                'state_dict': model.state_dict(),
-                'best_acc1': best_acc1,
-                'optimizer' : optimizer.state_dict(),
-                'scheduler' : scheduler.state_dict()
-            }, is_best)
+            if is_best:
+
+                print('Saving..')
+                model = model.cpu()
+                model_copy = deepcopy(model)
+                model = model.to(device)
+                for name, p in model_copy.named_modules():
+                    if args.c > 0:
+                        try:
+                            remove_spectral_norm(p)
+                        except:
+                            pass
+                    elif args.c < 0:
+                        try:
+                            remove_spectral_norm_conv(p)
+                        except:
+                            pass
+                    else:
+                        pass
+                if not os.path.isdir('checkpoint'):
+                    os.mkdir('checkpoint')
+                state = {
+                    'epoch': epoch + 1,
+                    'state_dict': model_copy.state_dict(),
+                    'best_acc1': best_acc1,
+                    'optimizer' : optimizer.state_dict(),
+                    'scheduler' : scheduler.state_dict()
+                        }
+                torch.save(state, './checkpoint/{}.pth'.format(model_name))
+    wandb.finish()
 
 
 def train(train_loader, model, criterion, optimizer, epoch, device, args):
@@ -343,8 +392,9 @@ def train(train_loader, model, criterion, optimizer, epoch, device, args):
         if i % args.print_freq == 0:
             progress.display(i + 1)
 
+    wandb.log({"train_loss": losses.avg, "train_acc1": top1.avg, "train_acc5": top5.avg}, step=epoch)
 
-def validate(val_loader, model, criterion, args):
+def validate(val_loader, model, criterion, epoch, args):
 
     def run_validate(loader, base_progress=0):
         with torch.no_grad():
@@ -402,6 +452,8 @@ def validate(val_loader, model, criterion, args):
         run_validate(aux_val_loader, len(val_loader))
 
     progress.display_summary()
+
+    wandb.log({"val_loss": losses.avg, "val_acc1": top1.avg, "val_acc5": top5.avg}, step=epoch)
 
     return top1.avg
 
