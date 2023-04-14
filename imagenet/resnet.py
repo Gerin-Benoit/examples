@@ -120,13 +120,13 @@ class Bottleneck(nn.Module):
 
 
 class ResNet(nn.Module):
-    def __init__(self, block, num_blocks, num_classes=10, norm=nn.BatchNorm2d, c=0, device='cpu'):
+    def __init__(self, block, num_blocks, num_classes=1000, norm=nn.BatchNorm2d, c=0, device='cpu'):
         super(ResNet, self).__init__()
-        img_size = (3, 32, 32)
+        img_size = (3, 224, 224)
         self.in_planes = 64
 
-        self.conv1 = wrapper_spectral_norm(nn.Conv2d(3, 64, kernel_size=3,
-                                                     stride=1, padding=1, bias=False), kernel_size=3, c=c,
+        self.conv1 = wrapper_spectral_norm(nn.Conv2d(3, 64, kernel_size=7,
+                                                     stride=2, padding=3, bias=False), kernel_size=7, c=c,
                                            shape=img_size)
         self.bn1 = norm(64)
         shape = (64, 32, 32)
@@ -141,6 +141,15 @@ class ResNet(nn.Module):
         shape = (512, 8, 8)
         self.layer4 = self._make_layer(block, 512, num_blocks[3], stride=2, norm=norm, c=c, shape=shape)
         self.linear = nn.Linear(512 * block.expansion, num_classes)
+
+        '''
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+        '''
 
         self.device = device
         self.smoothness = torch.tensor(c).to(self.device)
@@ -158,7 +167,7 @@ class ResNet(nn.Module):
 
         out = self.maxpool(out)  # difference with CIFAR10/100 script
 
-        print(out.shape)
+        print(out.shape)  #
         out = self.layer1(out)
         print(out.shape)
         out = self.layer2(out)
