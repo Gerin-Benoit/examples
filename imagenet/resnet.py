@@ -10,8 +10,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import Parameter
-from .spectral_norm_conv_inplace import *
-from .spectral_norm_fc import *
+from spectral_norm_conv_inplace import *
+from spectral_norm_fc import *
 
 
 class ActNormLP2D(nn.Module):
