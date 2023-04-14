@@ -23,6 +23,7 @@ from torch.utils.data import Subset
 from resnet import *
 from spectral_norm_conv_inplace import *
 from spectral_norm_fc import *
+import wandb
 
 model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
