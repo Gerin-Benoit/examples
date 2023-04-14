@@ -404,9 +404,11 @@ def validate(val_loader, model, criterion, epoch, args):
                 i = base_progress + i
                 if args.gpu is not None and torch.cuda.is_available():
                     images = images.cuda(args.gpu, non_blocking=True)
+                '''
                 if torch.backends.mps.is_available():
                     images = images.to('mps')
                     target = target.to('mps')
+                '''
                 if torch.cuda.is_available():
                     target = target.cuda(args.gpu, non_blocking=True)
 
