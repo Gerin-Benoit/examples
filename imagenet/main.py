@@ -211,8 +211,10 @@ def main_worker(gpu, ngpus_per_node, args):
                                 weight_decay=args.weight_decay)
     
     """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
-    scheduler = StepLR(optimizer, step_size=30, gamma=0.1)
-    
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)  # StepLR(optimizer, step_size=30, gamma=0.1)
+
+    scaler = torch.cuda.amp.GradScaler()
+
     # optionally resume from a checkpoint
     if args.resume:
         if os.path.isfile(args.resume):
@@ -303,7 +305,7 @@ def main_worker(gpu, ngpus_per_node, args):
             train_sampler.set_epoch(epoch)
 
         # train for one epoch
-        train(train_loader, model, criterion, optimizer, epoch, device, args)
+        train(train_loader, model, criterion, optimizer, epoch, scaler, device, args)
 
         # evaluate on validation set
         acc1 = validate(val_loader, model, criterion, epoch, args)
@@ -348,7 +350,7 @@ def main_worker(gpu, ngpus_per_node, args):
     wandb.finish()
 
 
-def train(train_loader, model, criterion, optimizer, epoch, device, args):
+def train(train_loader, model, criterion, optimizer, scaler, epoch, device, args):
     batch_time = AverageMeter('Time', ':6.3f')
     data_time = AverageMeter('Data', ':6.3f')
     losses = AverageMeter('Loss', ':.4e')
@@ -372,19 +374,24 @@ def train(train_loader, model, criterion, optimizer, epoch, device, args):
         target = target.to(device, non_blocking=True)
 
         # compute output
-        output = model(images)
-        loss = criterion(output, target)
+        with torch.cuda.amp.autocast():
+            output = model(images)
+            loss = criterion(output, target)
 
-        # measure accuracy and record loss
-        acc1, acc5 = accuracy(output, target, topk=(1, 5))
-        losses.update(loss.item(), images.size(0))
-        top1.update(acc1[0], images.size(0))
-        top5.update(acc5[0], images.size(0))
+            # measure accuracy and record loss
+            acc1, acc5 = accuracy(output, target, topk=(1, 5))
+            losses.update(loss.item(), images.size(0))
+            top1.update(acc1[0], images.size(0))
+            top5.update(acc5[0], images.size(0))
 
-        # compute gradient and do SGD step
+            # compute gradient and do SGD step
+
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
+        #loss.backward()
+        #optimizer.step()
         optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
 
         # measure elapsed time
         batch_time.update(time.time() - end)
