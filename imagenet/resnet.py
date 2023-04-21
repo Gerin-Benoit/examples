@@ -163,19 +163,19 @@ class ResNet(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        print(x.shape)
+        #print(x.shape)
         out = F.relu(self.bn1(self.conv1(x)), inplace=True)
 
         out = self.maxpool(out)  # difference with CIFAR10/100 script
-        print(out.shape)
+        #print(out.shape)
         out = self.layer1(out)
-        print(out.shape)
+        #print(out.shape)
         out = self.layer2(out)
-        print(out.shape)
+        #print(out.shape)
         out = self.layer3(out)
-        print(out.shape)
+        #print(out.shape)
         out = self.layer4(out)
-        print(out.shape)
+        #print(out.shape)
         out = F.avg_pool2d(out, 4)
         out = out.view(out.size(0), -1)
         out = self.linear(out)
