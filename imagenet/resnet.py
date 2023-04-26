@@ -238,6 +238,7 @@ class ResNet(nn.Module):
 
     def forward(self, x):
         out = self.activation(self.bn1(self.conv1(x)), inplace=True)
+        out = self.maxpool(out)
         # print(out.shape)
         out = self.layer1(out)
         # print(out.shape)
@@ -253,7 +254,8 @@ class ResNet(nn.Module):
         return out
 
     def get_features(self, x):
-        out = F.relu(self.bn1(self.conv1(x)), inplace=True)
+        out = self.activation(self.bn1(self.conv1(x)), inplace=True)
+        out = self.maxpool(out)
         # print(out.shape)
         out = self.layer1(out)
         # print(out.shape)
@@ -287,7 +289,7 @@ def ResNet34():
     return ResNet(BasicBlock, [3, 4, 6, 3])
 
 
-def ResNet50(c=0, num_classes=10, norm_layer='batchnorm', device='cpu', mod=False, fc_sn=False):
+def ResNet50(c=0, num_classes=1000, norm_layer='batchnorm', device='cpu', mod=False, fc_sn=False):
     norm = nn.BatchNorm2d if norm_layer == 'batchnorm' else ActNormLP2D_else if norm_layer == 'actnorm_2' else ActNormLP2D
     return ResNet(Bottleneck, [3, 4, 6, 3], num_classes=num_classes,
                   norm=norm, c=c, device=device, mod=mod, fc_sn=fc_sn)
